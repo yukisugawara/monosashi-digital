@@ -1,0 +1,7 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.DS_Store
+create_architecture_pptx.py
+architecture.pptx

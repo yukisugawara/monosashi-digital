@@ -1,0 +1,8 @@
+streamlit
+librosa
+numpy
+soundfile
+openai-whisper
+anthropic
+python-dotenv
+plotly
