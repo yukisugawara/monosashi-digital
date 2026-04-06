@@ -456,7 +456,8 @@ with input_col2:
 
 # Sample load button
 sample_path = Path(__file__).parent / "sample.m4a"
-if sample_path.exists() and uploaded_file is None:
+sample_results_path = Path(__file__).parent / "sample_results.json"
+if sample_path.exists() and uploaded_file is None and not st.session_state.use_sample:
     if st.button("🎧 サンプル音声で試してみる"):
         st.session_state.use_sample = True
         st.rerun()
@@ -468,8 +469,8 @@ if uploaded_file is not None:
     audio_source = uploaded_file
 elif st.session_state.use_sample and sample_path.exists():
     st.audio(str(sample_path), format="audio/m4a")
-    st.info("📎 サンプル音声を読み込んでいます")
-    audio_source = sample_path
+    st.info("📎 サンプル音声の分析結果を表示しています")
+    audio_source = "sample_precomputed"
 else:
     audio_source = None
 
@@ -942,31 +943,40 @@ def draw_audio_radar(fluency: dict, pause: dict, speech_rate: dict, prosody: dic
 # ---------------------------------------------------------------------------
 
 if audio_source is not None:
-    # Determine temp file path
-    if isinstance(audio_source, Path):
-        # Sample file: use directly, no temp file needed
-        tmp_path = str(audio_source)
+    # ---- Sample precomputed mode ----
+    if audio_source == "sample_precomputed" and sample_results_path.exists():
+        with open(sample_results_path, "r", encoding="utf-8") as f:
+            sample_data = json.load(f)
+        fluency = sample_data["fluency"]
+        pause = sample_data["pause"]
+        prosody = sample_data["prosody"]
+        speech_rate = sample_data["speech_rate"]
+        pronunciation = sample_data["pronunciation"]
+        self_repair = sample_data["self_repair"]
+        engagement = sample_data["engagement"]
+        llm_result = sample_data["llm_result"]
+        transcript = sample_data["transcript"]
         _is_temp = False
+
+    # ---- Normal upload mode ----
     else:
-        # Uploaded file: write to temp
         suffix = Path(audio_source.name).suffix
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
             tmp.write(audio_source.getvalue())
             tmp_path = tmp.name
         _is_temp = True
 
-    try:
         with st.status("解析を実行中...", expanded=True) as status:
             st.write("🔊 音声を解析中...")
             try:
-                fluency = analyze_fluency(tmp_path)
+                fluency_raw = analyze_fluency(tmp_path)
             except ValueError as e:
                 st.error(str(e))
                 st.stop()
 
             st.write("🔍 ポーズ・韻律を分析中...")
-            pause = analyze_pause(fluency["intervals"], fluency["sr"], fluency["total_duration"])
-            prosody = analyze_prosody(fluency["y"], fluency["sr"])
+            pause = analyze_pause(fluency_raw["intervals"], fluency_raw["sr"], fluency_raw["total_duration"])
+            prosody = analyze_prosody(fluency_raw["y"], fluency_raw["sr"])
 
             st.write("📝 音声をテキスト化中...")
             try:
@@ -979,10 +989,10 @@ if audio_source is not None:
             token_probs = whisper_result["token_probs"]
 
             st.write("🔬 発音自信度・自己修復・エンゲージメントを分析中...")
-            speech_rate = analyze_speech_rate(transcript, fluency["speaking_duration"])
+            speech_rate = analyze_speech_rate(transcript, fluency_raw["speaking_duration"])
             pronunciation = analyze_pronunciation_confidence(token_probs)
-            self_repair = analyze_self_repair(transcript, fluency["speaking_duration"])
-            engagement = analyze_engagement(fluency["y"], fluency["sr"], prosody)
+            self_repair = analyze_self_repair(transcript, fluency_raw["speaking_duration"])
+            engagement = analyze_engagement(fluency_raw["y"], fluency_raw["sr"], prosody)
 
             st.write("🤖 ことばの力のものさしで評価中...")
             try:
@@ -993,219 +1003,223 @@ if audio_source is not None:
 
             status.update(label="解析完了 ✨", state="complete", expanded=False)
 
-        # ==============================================================
-        # Results: Stage & Step
-        # ==============================================================
-        stage = llm_result.get("stage", "?")
-        stage_name = STAGE_INFO.get(stage, "")
-        step = llm_result.get("step", 0)
-        max_step = max(STEP_RUBRIC[grade_level].keys())
+            # Store serializable fluency data
+            fluency = {k: v for k, v in fluency_raw.items() if k not in ("y", "sr", "intervals")}
 
-        st.markdown('<div class="glass">', unsafe_allow_html=True)
-
-        badge_col, indicator_col = st.columns([1, 2])
-
-        with badge_col:
-            st.markdown(
-                f'<div style="text-align:center;">'
-                f'<div class="badge-label">発達ステージ</div>'
-                f'<div class="stage-badge">ステージ {stage}</div>'
-                f'<div class="badge-sub">【{stage_name}】</div>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-            st.markdown("<br>", unsafe_allow_html=True)
-            st.markdown(
-                f'<div style="text-align:center;">'
-                f'<div class="badge-label">習得ステップ（{grade_level}）</div>'
-                f'<div class="step-badge">ステップ {step}</div>'
-                f'</div>',
-                unsafe_allow_html=True,
-            )
-
-        with indicator_col:
-            st.markdown("#### 包括的なことばの発達ステージ（A〜F）")
-            st.markdown(draw_stage_bar(stage), unsafe_allow_html=True)
-            st.markdown(
-                f'<div class="feedback-card stage">{llm_result.get("stage_reasoning", "")}</div>',
-                unsafe_allow_html=True,
-            )
-            st.markdown("<br>", unsafe_allow_html=True)
-            st.markdown(f"#### 日本語の習得ステップ（1〜{max_step}）")
-            st.markdown(draw_step_bar(step, max_step), unsafe_allow_html=True)
-            st.markdown(
-                f'<div class="feedback-card step">{llm_result.get("step_reasoning", "")}</div>',
-                unsafe_allow_html=True,
-            )
-
-        st.markdown("</div>", unsafe_allow_html=True)
-
-        # ==============================================================
-        # Feedback: strengths / goals / support
-        # ==============================================================
-        fb_col1, fb_col2, fb_col3 = st.columns(3)
-
-        with fb_col1:
-            st.markdown('<div class="glass">', unsafe_allow_html=True)
-            st.markdown("### 💪 強み・できていること")
-            st.markdown(
-                f'<div class="feedback-card strengths">{llm_result.get("strengths", "")}</div>',
-                unsafe_allow_html=True,
-            )
-            st.markdown("</div>", unsafe_allow_html=True)
-
-        with fb_col2:
-            st.markdown('<div class="glass">', unsafe_allow_html=True)
-            st.markdown("### 🎯 次の目標")
-            st.markdown(
-                f'<div class="feedback-card goals">{llm_result.get("next_goals", "")}</div>',
-                unsafe_allow_html=True,
-            )
-            st.markdown("</div>", unsafe_allow_html=True)
-
-        with fb_col3:
-            st.markdown('<div class="glass">', unsafe_allow_html=True)
-            st.markdown("### 📖 支援のアドバイス")
-            st.markdown(
-                f'<div class="feedback-card support">{llm_result.get("support_suggestions", "")}</div>',
-                unsafe_allow_html=True,
-            )
-            st.markdown("</div>", unsafe_allow_html=True)
-
-        # ==============================================================
-        # Audio-based analysis: confidence, self-repair, engagement
-        # ==============================================================
-        st.markdown("## 🔬 音声・認識モデルの分析")
-        au_col1, au_col2, au_col3 = st.columns(3)
-
-        with au_col1:
-            st.markdown('<div class="glass">', unsafe_allow_html=True)
-            st.markdown("### 🎤 発音の自信度")
-            conf_pct = f"{pronunciation['mean_confidence']:.1%}"
-            st.metric("平均確信度", conf_pct)
-            low_words = pronunciation["low_confidence_words"]
-            if low_words:
-                word_list = "、".join(
-                    f"**{w['word']}**（{w['confidence']:.0%}）" for w in low_words[:5]
-                )
-                st.markdown(
-                    f'<div class="feedback-card confidence">確信度が低い箇所: {word_list}</div>',
-                    unsafe_allow_html=True,
-                )
-            else:
-                st.markdown(
-                    '<div class="feedback-card confidence">全体的に安定した発音です。</div>',
-                    unsafe_allow_html=True,
-                )
-            st.markdown("</div>", unsafe_allow_html=True)
-
-        with au_col2:
-            st.markdown('<div class="glass">', unsafe_allow_html=True)
-            st.markdown("### 🔄 自己修復・フィラー")
-            st.metric("フィラー回数", f"{self_repair['filler_count']} 回")
-            st.metric("フィラー頻度", f"{self_repair['filler_rate_per_min']} 回/分")
-            examples = self_repair["filler_examples"]
-            if examples:
-                ex_str = "、".join(f"「{e}」" for e in examples)
-                st.markdown(
-                    f'<div class="feedback-card selfrepair">検出されたフィラー: {ex_str}<br>'
-                    f'自己修復はメタ認知の現れでもあり、自分の発話を振り返れている証拠です。</div>',
-                    unsafe_allow_html=True,
-                )
-            else:
-                st.markdown(
-                    '<div class="feedback-card selfrepair">フィラーや言い直しは検出されませんでした。</div>',
-                    unsafe_allow_html=True,
-                )
-            st.markdown("</div>", unsafe_allow_html=True)
-
-        with au_col3:
-            st.markdown('<div class="glass">', unsafe_allow_html=True)
-            st.markdown("### 😊 エンゲージメント")
-            st.metric("エンゲージメントスコア", f"{engagement['engagement_score']} / 100")
-            if engagement["is_flat"]:
-                msg = "声量・ピッチともに平坦な傾向があります。不安感や自信のなさが見られるかもしれません。安心して話せる環境づくりが大切です。"
-            else:
-                msg = "声の張りやピッチの変動があり、発話に対する意欲的な姿勢が感じられます。"
-            st.markdown(
-                f'<div class="feedback-card engagement">{msg}</div>',
-                unsafe_allow_html=True,
-            )
-            st.markdown("</div>", unsafe_allow_html=True)
-
-        # ==============================================================
-        # LLM-based extended analysis
-        # ==============================================================
-        st.markdown("## 🧠 テキスト分析（LLM）")
-        lx_col1, lx_col2 = st.columns(2)
-
-        with lx_col1:
-            st.markdown('<div class="glass">', unsafe_allow_html=True)
-            st.markdown("### 💡 コミュニケーション方略")
-            st.markdown(
-                f'<div class="feedback-card comm">{llm_result.get("communication_strategies", "該当なし")}</div>',
-                unsafe_allow_html=True,
-            )
-            st.markdown("</div>", unsafe_allow_html=True)
-
-            st.markdown('<div class="glass">', unsafe_allow_html=True)
-            st.markdown("### 🌐 コードスイッチング")
-            st.markdown(
-                f'<div class="feedback-card codesw">{llm_result.get("code_switching", "該当なし")}</div>',
-                unsafe_allow_html=True,
-            )
-            st.markdown("</div>", unsafe_allow_html=True)
-
-        with lx_col2:
-            st.markdown('<div class="glass">', unsafe_allow_html=True)
-            st.markdown("### 🤝 相互行為能力")
-            st.markdown(
-                f'<div class="feedback-card interact">{llm_result.get("interactive_competence", "該当なし")}</div>',
-                unsafe_allow_html=True,
-            )
-            st.markdown("</div>", unsafe_allow_html=True)
-
-            st.markdown('<div class="glass">', unsafe_allow_html=True)
-            st.markdown("### ✨ 言語的創造性")
-            st.markdown(
-                f'<div class="feedback-card creativity">{llm_result.get("linguistic_creativity", "該当なし")}</div>',
-                unsafe_allow_html=True,
-            )
-            st.markdown("</div>", unsafe_allow_html=True)
-
-        # ==============================================================
-        # Audio metrics (collapsible)
-        # ==============================================================
-        with st.expander("🎙️ 音声分析の詳細データ"):
-            chart_col, data_col = st.columns([3, 2])
-
-            with chart_col:
-                fig = draw_audio_radar(fluency, pause, speech_rate, prosody)
-                st.plotly_chart(fig, use_container_width=True)
-
-            with data_col:
-                st.markdown("**発話時間**")
-                st.metric("総時間", f"{fluency['total_duration']} 秒")
-                st.metric("発話時間", f"{fluency['speaking_duration']} 秒")
-                st.metric("発話比率", f"{fluency['phonation_time_ratio']:.1%}")
-
-                st.markdown("**ポーズ**")
-                st.metric("ポーズ回数", f"{pause['pause_count']} 回")
-                st.metric("平均ポーズ長", f"{pause['mean_pause_duration']} 秒")
-
-                st.markdown("**発話速度**")
-                st.metric("速度", f"{speech_rate['chars_per_sec']} 字/秒")
-
-                st.markdown("**韻律**")
-                st.metric("平均ピッチ", f"{prosody['pitch_mean_hz']} Hz")
-                st.metric("ピッチ範囲", f"{prosody['pitch_range_hz']} Hz")
-
-        # ==============================================================
-        # Transcript
-        # ==============================================================
-        with st.expander("💬 文字起こしテキストを表示"):
-            st.write(transcript)
-
-    finally:
+        # Clean up temp file
         if _is_temp:
             Path(tmp_path).unlink(missing_ok=True)
+
+    # ==================================================================
+    # Results: Stage & Step
+    # ==================================================================
+    stage = llm_result.get("stage", "?")
+    stage_name = STAGE_INFO.get(stage, "")
+    step = llm_result.get("step", 0)
+    max_step = max(STEP_RUBRIC[grade_level].keys())
+
+    st.markdown('<div class="glass">', unsafe_allow_html=True)
+
+    badge_col, indicator_col = st.columns([1, 2])
+
+    with badge_col:
+        st.markdown(
+            f'<div style="text-align:center;">'
+            f'<div class="badge-label">発達ステージ</div>'
+            f'<div class="stage-badge">ステージ {stage}</div>'
+            f'<div class="badge-sub">【{stage_name}】</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown(
+            f'<div style="text-align:center;">'
+            f'<div class="badge-label">習得ステップ（{grade_level}）</div>'
+            f'<div class="step-badge">ステップ {step}</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+    with indicator_col:
+        st.markdown("#### 包括的なことばの発達ステージ（A〜F）")
+        st.markdown(draw_stage_bar(stage), unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="feedback-card stage">{llm_result.get("stage_reasoning", "")}</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown("<br>", unsafe_allow_html=True)
+        st.markdown(f"#### 日本語の習得ステップ（1〜{max_step}）")
+        st.markdown(draw_step_bar(step, max_step), unsafe_allow_html=True)
+        st.markdown(
+            f'<div class="feedback-card step">{llm_result.get("step_reasoning", "")}</div>',
+            unsafe_allow_html=True,
+        )
+
+    st.markdown("</div>", unsafe_allow_html=True)
+
+    # ==============================================================
+    # Feedback: strengths / goals / support
+    # ==============================================================
+    fb_col1, fb_col2, fb_col3 = st.columns(3)
+
+    with fb_col1:
+        st.markdown('<div class="glass">', unsafe_allow_html=True)
+        st.markdown("### 💪 強み・できていること")
+        st.markdown(
+            f'<div class="feedback-card strengths">{llm_result.get("strengths", "")}</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    with fb_col2:
+        st.markdown('<div class="glass">', unsafe_allow_html=True)
+        st.markdown("### 🎯 次の目標")
+        st.markdown(
+            f'<div class="feedback-card goals">{llm_result.get("next_goals", "")}</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    with fb_col3:
+        st.markdown('<div class="glass">', unsafe_allow_html=True)
+        st.markdown("### 📖 支援のアドバイス")
+        st.markdown(
+            f'<div class="feedback-card support">{llm_result.get("support_suggestions", "")}</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    # ==============================================================
+    # Audio-based analysis: confidence, self-repair, engagement
+    # ==============================================================
+    st.markdown("## 🔬 音声・認識モデルの分析")
+    au_col1, au_col2, au_col3 = st.columns(3)
+
+    with au_col1:
+        st.markdown('<div class="glass">', unsafe_allow_html=True)
+        st.markdown("### 🎤 発音の自信度")
+        conf_pct = f"{pronunciation['mean_confidence']:.1%}"
+        st.metric("平均確信度", conf_pct)
+        low_words = pronunciation["low_confidence_words"]
+        if low_words:
+            word_list = "、".join(
+                f"**{w['word']}**（{w['confidence']:.0%}）" for w in low_words[:5]
+            )
+            st.markdown(
+                f'<div class="feedback-card confidence">確信度が低い箇所: {word_list}</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                '<div class="feedback-card confidence">全体的に安定した発音です。</div>',
+                unsafe_allow_html=True,
+            )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    with au_col2:
+        st.markdown('<div class="glass">', unsafe_allow_html=True)
+        st.markdown("### 🔄 自己修復・フィラー")
+        st.metric("フィラー回数", f"{self_repair['filler_count']} 回")
+        st.metric("フィラー頻度", f"{self_repair['filler_rate_per_min']} 回/分")
+        examples = self_repair["filler_examples"]
+        if examples:
+            ex_str = "、".join(f"「{e}」" for e in examples)
+            st.markdown(
+                f'<div class="feedback-card selfrepair">検出されたフィラー: {ex_str}<br>'
+                f'自己修復はメタ認知の現れでもあり、自分の発話を振り返れている証拠です。</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            st.markdown(
+                '<div class="feedback-card selfrepair">フィラーや言い直しは検出されませんでした。</div>',
+                unsafe_allow_html=True,
+            )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    with au_col3:
+        st.markdown('<div class="glass">', unsafe_allow_html=True)
+        st.markdown("### 😊 エンゲージメント")
+        st.metric("エンゲージメントスコア", f"{engagement['engagement_score']} / 100")
+        if engagement["is_flat"]:
+            msg = "声量・ピッチともに平坦な傾向があります。不安感や自信のなさが見られるかもしれません。安心して話せる環境づくりが大切です。"
+        else:
+            msg = "声の張りやピッチの変動があり、発話に対する意欲的な姿勢が感じられます。"
+        st.markdown(
+            f'<div class="feedback-card engagement">{msg}</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    # ==============================================================
+    # LLM-based extended analysis
+    # ==============================================================
+    st.markdown("## 🧠 テキスト分析（LLM）")
+    lx_col1, lx_col2 = st.columns(2)
+
+    with lx_col1:
+        st.markdown('<div class="glass">', unsafe_allow_html=True)
+        st.markdown("### 💡 コミュニケーション方略")
+        st.markdown(
+            f'<div class="feedback-card comm">{llm_result.get("communication_strategies", "該当なし")}</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        st.markdown('<div class="glass">', unsafe_allow_html=True)
+        st.markdown("### 🌐 コードスイッチング")
+        st.markdown(
+            f'<div class="feedback-card codesw">{llm_result.get("code_switching", "該当なし")}</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    with lx_col2:
+        st.markdown('<div class="glass">', unsafe_allow_html=True)
+        st.markdown("### 🤝 相互行為能力")
+        st.markdown(
+            f'<div class="feedback-card interact">{llm_result.get("interactive_competence", "該当なし")}</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+        st.markdown('<div class="glass">', unsafe_allow_html=True)
+        st.markdown("### ✨ 言語的創造性")
+        st.markdown(
+            f'<div class="feedback-card creativity">{llm_result.get("linguistic_creativity", "該当なし")}</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown("</div>", unsafe_allow_html=True)
+
+    # ==============================================================
+    # Audio metrics (collapsible)
+    # ==============================================================
+    with st.expander("🎙️ 音声分析の詳細データ"):
+        chart_col, data_col = st.columns([3, 2])
+
+        with chart_col:
+            fig = draw_audio_radar(fluency, pause, speech_rate, prosody)
+            st.plotly_chart(fig, use_container_width=True)
+
+        with data_col:
+            st.markdown("**発話時間**")
+            st.metric("総時間", f"{fluency['total_duration']} 秒")
+            st.metric("発話時間", f"{fluency['speaking_duration']} 秒")
+            st.metric("発話比率", f"{fluency['phonation_time_ratio']:.1%}")
+
+            st.markdown("**ポーズ**")
+            st.metric("ポーズ回数", f"{pause['pause_count']} 回")
+            st.metric("平均ポーズ長", f"{pause['mean_pause_duration']} 秒")
+
+            st.markdown("**発話速度**")
+            st.metric("速度", f"{speech_rate['chars_per_sec']} 字/秒")
+
+            st.markdown("**韻律**")
+            st.metric("平均ピッチ", f"{prosody['pitch_mean_hz']} Hz")
+            st.metric("ピッチ範囲", f"{prosody['pitch_range_hz']} Hz")
+
+    # ==============================================================
+    # Transcript
+    # ==============================================================
+    with st.expander("💬 文字起こしテキストを表示"):
+        st.write(transcript)
+
