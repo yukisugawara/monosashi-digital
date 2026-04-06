@@ -432,6 +432,12 @@ st.markdown("""
 # ---------------------------------------------------------------------------
 # Input controls
 # ---------------------------------------------------------------------------
+GRADE_OPTIONS = ["小1〜小2段階", "小3〜小4段階", "小5〜中2段階", "中3〜高校段階"]
+
+# Session state for sample mode
+if "use_sample" not in st.session_state:
+    st.session_state.use_sample = False
+
 input_col1, input_col2 = st.columns([2, 1])
 
 with input_col1:
@@ -441,24 +447,31 @@ with input_col1:
     )
 
 with input_col2:
+    default_grade_idx = GRADE_OPTIONS.index("中3〜高校段階") if st.session_state.use_sample else 0
     grade_level = st.selectbox(
         "学年段階を選択",
-        ["小1〜小2段階", "小3〜小4段階", "小5〜中2段階", "中3〜高校段階"],
+        GRADE_OPTIONS,
+        index=default_grade_idx,
     )
 
-# Sample file download
+# Sample load button
 sample_path = Path(__file__).parent / "sample.m4a"
-if sample_path.exists():
-    with open(sample_path, "rb") as f:
-        st.download_button(
-            label="🎧 サンプル音声をダウンロード（sample.m4a）",
-            data=f,
-            file_name="sample.m4a",
-            mime="audio/m4a",
-        )
+if sample_path.exists() and uploaded_file is None:
+    if st.button("🎧 サンプル音声で試してみる"):
+        st.session_state.use_sample = True
+        st.rerun()
 
+# Determine audio source
 if uploaded_file is not None:
+    st.session_state.use_sample = False
     st.audio(uploaded_file)
+    audio_source = uploaded_file
+elif st.session_state.use_sample and sample_path.exists():
+    st.audio(str(sample_path), format="audio/m4a")
+    st.info("📎 サンプル音声を読み込んでいます")
+    audio_source = sample_path
+else:
+    audio_source = None
 
 MIN_DURATION_SEC = 0.5
 
@@ -928,11 +941,19 @@ def draw_audio_radar(fluency: dict, pause: dict, speech_rate: dict, prosody: dic
 # Main: display results
 # ---------------------------------------------------------------------------
 
-if uploaded_file is not None:
-    suffix = Path(uploaded_file.name).suffix
-    with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
-        tmp.write(uploaded_file.getvalue())
-        tmp_path = tmp.name
+if audio_source is not None:
+    # Determine temp file path
+    if isinstance(audio_source, Path):
+        # Sample file: use directly, no temp file needed
+        tmp_path = str(audio_source)
+        _is_temp = False
+    else:
+        # Uploaded file: write to temp
+        suffix = Path(audio_source.name).suffix
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp:
+            tmp.write(audio_source.getvalue())
+            tmp_path = tmp.name
+        _is_temp = True
 
     try:
         with st.status("解析を実行中...", expanded=True) as status:
@@ -1186,4 +1207,5 @@ if uploaded_file is not None:
             st.write(transcript)
 
     finally:
-        Path(tmp_path).unlink(missing_ok=True)
+        if _is_temp:
+            Path(tmp_path).unlink(missing_ok=True)
