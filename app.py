@@ -19,9 +19,11 @@ st.set_page_config(page_title="ことばの力のものさし・デジタル版"
 # ---------------------------------------------------------------------------
 # Custom CSS: light modern gradient design
 # ---------------------------------------------------------------------------
-st.markdown("""
-<link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;700;900&display=swap" rel="stylesheet">
-<style>
+st.markdown(
+    '<link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;700;900&display=swap" rel="stylesheet">',
+    unsafe_allow_html=True,
+)
+st.markdown("""<style>
 /* ---------- global ---------- */
 html, body, [class*="css"] {
     font-family: 'Zen Maru Gothic', 'Noto Sans JP', sans-serif !important;
@@ -150,6 +152,9 @@ h1, h2, h3, h4, h5, h6, p, li, span, label, div { color: #1e293b; }
     transform: scale(1.05);
 }
 
+</style>""", unsafe_allow_html=True)
+
+st.markdown("""<style>
 /* ---------- step indicator ---------- */
 .step-bar {
     display: flex;
@@ -440,6 +445,17 @@ with input_col2:
         "学年段階を選択",
         ["小1〜小2段階", "小3〜小4段階", "小5〜中2段階", "中3〜高校段階"],
     )
+
+# Sample file download
+sample_path = Path(__file__).parent / "sample.m4a"
+if sample_path.exists():
+    with open(sample_path, "rb") as f:
+        st.download_button(
+            label="🎧 サンプル音声をダウンロード（sample.m4a）",
+            data=f,
+            file_name="sample.m4a",
+            mime="audio/m4a",
+        )
 
 if uploaded_file is not None:
     st.audio(uploaded_file)
