@@ -588,7 +588,7 @@ def analyze_prosody(y: np.ndarray, sr: int) -> dict:
 
 @st.cache_resource
 def load_whisper_model():
-    return whisper.load_model("base")
+    return whisper.load_model("tiny")
 
 
 def transcribe_audio(audio_path: str) -> dict:
@@ -817,10 +817,16 @@ def build_system_prompt(grade: str) -> str:
 # ---------------------------------------------------------------------------
 
 def analyze_text_with_llm(transcript: str, grade: str) -> dict:
+    # Streamlit Cloud uses st.secrets, local uses .env
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
+        try:
+            api_key = st.secrets["ANTHROPIC_API_KEY"]
+        except (KeyError, FileNotFoundError):
+            pass
+    if not api_key:
         raise EnvironmentError(
-            "ANTHROPIC_API_KEY が設定されていません。`.env` ファイルを確認してください。"
+            "ANTHROPIC_API_KEY が設定されていません。Streamlit Cloud の Secrets または `.env` ファイルを確認してください。"
         )
 
     client = anthropic.Anthropic(api_key=api_key)
