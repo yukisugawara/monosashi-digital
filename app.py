@@ -215,8 +215,204 @@ h3 {
     background: rgba(255,255,255,0.6) !important;
     border-radius: 16px !important;
 }
+
+/* ---------- about dialog ---------- */
+.arch-flow {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    margin: 1.2rem 0;
+}
+.arch-node {
+    flex: 1;
+    border-radius: 16px;
+    padding: 1rem;
+    text-align: center;
+    position: relative;
+}
+.arch-node h4 { margin: 0 0 0.5rem; font-size: 0.95rem; }
+.arch-node ul { text-align: left; font-size: 0.82rem; line-height: 1.6; padding-left: 1.2rem; margin: 0; }
+.arch-node.input   { background: linear-gradient(135deg, #dbeafe, #ede9fe); border: 2px solid #818cf8; }
+.arch-node.audio   { background: linear-gradient(135deg, #ede9fe, #f3e8ff); border: 2px solid #a78bfa; }
+.arch-node.whisper  { background: linear-gradient(135deg, #fef3c7, #ffedd5); border: 2px solid #f59e0b; }
+.arch-node.llm     { background: linear-gradient(135deg, #fce7f3, #fdf2f8); border: 2px solid #ec4899; }
+.arch-node.output  { background: linear-gradient(135deg, #d1fae5, #ecfdf5); border: 2px solid #34d399; }
+.arch-arrow {
+    display: flex;
+    align-items: center;
+    font-size: 1.5rem;
+    color: #94a3b8;
+    padding: 0 0.3rem;
+}
+.usage-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+    margin: 0.8rem 0;
+    padding: 1rem;
+    background: rgba(99,102,241,0.05);
+    border-radius: 14px;
+    border-left: 4px solid #6366f1;
+}
+.usage-step .num {
+    font-size: 1.6rem;
+    font-weight: 900;
+    background: linear-gradient(135deg, #6366f1, #ec4899);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    min-width: 2rem;
+}
+.usage-step .desc { font-size: 0.93rem; color: #334155; line-height: 1.7; }
+
+/* sidebar about button */
+section[data-testid="stSidebar"] {
+    background: rgba(255,255,255,0.7);
+    backdrop-filter: blur(12px);
+}
+section[data-testid="stSidebar"] .stButton > button {
+    background: linear-gradient(135deg, #6366f1, #8b5cf6) !important;
+    color: white !important;
+    border: none !important;
+    border-radius: 12px !important;
+    font-weight: 700 !important;
+    font-size: 0.95rem !important;
+    padding: 0.6rem 1rem !important;
+}
 </style>
 """, unsafe_allow_html=True)
+
+# ---------------------------------------------------------------------------
+# About dialog
+# ---------------------------------------------------------------------------
+
+@st.dialog("このアプリについて", width="large")
+def show_about():
+    st.markdown("## ことばの力のものさし・デジタル版")
+    st.markdown(
+        "文部科学省「ことばの力のものさし」（2025年）に基づき、"
+        "児童生徒の発話音声を AI で多角的に評価するアプリです。"
+    )
+
+    st.markdown("### 📐 処理の流れ（アーキテクチャ）")
+    st.markdown("""
+<div class="arch-flow">
+    <div class="arch-node input">
+        <h4>🎤 入力</h4>
+        <ul>
+            <li>音声ファイル<br>(.wav/.mp3/.m4a)</li>
+            <li>学年段階の選択</li>
+        </ul>
+    </div>
+    <div class="arch-arrow">→</div>
+    <div class="arch-node audio">
+        <h4>🔊 音声信号処理<br><small>Librosa</small></h4>
+        <ul>
+            <li>流暢さ（発話時間比率）</li>
+            <li>ポーズ（頻度・長さ）</li>
+            <li>韻律（ピッチ分析）</li>
+            <li>エンゲージメント<br>（RMS + F0）</li>
+        </ul>
+    </div>
+    <div class="arch-arrow">→</div>
+    <div class="arch-node whisper">
+        <h4>📝 音声認識<br><small>Whisper</small></h4>
+        <ul>
+            <li>日本語テキスト書き起こし</li>
+            <li>発音自信度<br>（トークン確信度）</li>
+            <li>フィラー・自己修復の検出</li>
+            <li>発話速度の算出</li>
+        </ul>
+    </div>
+    <div class="arch-arrow">→</div>
+    <div class="arch-node llm">
+        <h4>🤖 LLM 評価<br><small>Claude Sonnet 4</small></h4>
+        <ul>
+            <li>発達ステージ判定（A〜F）</li>
+            <li>習得ステップ判定（1〜8）</li>
+            <li>コミュニケーション方略</li>
+            <li>コードスイッチング</li>
+            <li>相互行為能力</li>
+            <li>言語的創造性</li>
+        </ul>
+    </div>
+    <div class="arch-arrow">→</div>
+    <div class="arch-node output">
+        <h4>📊 結果表示<br><small>Streamlit</small></h4>
+        <ul>
+            <li>ステージ・ステップ判定</li>
+            <li>強み / 目標 / 支援提案</li>
+            <li>音声・テキスト分析</li>
+            <li>レーダーチャート</li>
+        </ul>
+    </div>
+</div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("### 📖 使い方")
+    st.markdown("""
+<div class="usage-step">
+    <div class="num">1</div>
+    <div class="desc"><b>学年段階を選択</b><br>対象の児童生徒の学年段階（小1〜小2 / 小3〜小4 / 小5〜中2 / 中3〜高校）を選んでください。習得ステップの判定基準が変わります。</div>
+</div>
+<div class="usage-step">
+    <div class="num">2</div>
+    <div class="desc"><b>音声ファイルをアップロード</b><br>児童生徒の発話を録音した音声ファイル（.wav / .mp3 / .m4a）をドラッグ＆ドロップまたは選択してアップロードします。</div>
+</div>
+<div class="usage-step">
+    <div class="num">3</div>
+    <div class="desc"><b>自動で解析開始</b><br>アップロード後、自動的に音声分析 → 書き起こし → AI 評価が実行されます。数十秒〜1分程度お待ちください。</div>
+</div>
+<div class="usage-step">
+    <div class="num">4</div>
+    <div class="desc"><b>結果を確認</b><br>「発達ステージ（A〜F）」と「習得ステップ（1〜8）」の判定結果、強み・次の目標・支援のアドバイスが表示されます。音声分析の詳細データやテキスト分析も確認できます。</div>
+</div>
+    """, unsafe_allow_html=True)
+
+    st.markdown("### 📏 評価の2つの軸")
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("""
+**包括的なことばの発達ステージ（A〜F）**
+
+思考・判断・表現を支える力を評価します。
+
+| ステージ | 名称 | 特徴 |
+|:---:|:---|:---|
+| A | イマココ期 | 断片的に話せる |
+| B | イマココから順序期 | おおまかに順序立てて話せる |
+| C | 順序期 | くわしく順序立てて話せる |
+| D | 因果期 | 因果関係を含めて説明できる |
+| E | 抽象期 | 抽象的概念を議論できる |
+| F | 評価・発展期 | 批判的視点で議論できる |
+        """)
+    with col2:
+        st.markdown("""
+**日本語の習得ステップ（1〜8）**
+
+日本語固有の知識・技能の習得状況を評価します。
+
+- 学年段階ごとに異なる基準で判定
+- ステップの進み具合は個人差が大きい
+- 「聞く・話す」の技能に焦点
+
+ステップ 1（初期段階）〜 ステップ 8（高度な運用）まで、段階的な成長を捉えます。
+        """)
+
+    st.markdown("---")
+    st.markdown(
+        "<small>基準: 文部科学省「ことばの発達と習得のものさし まるわかりガイド」（2025年4月）</small>",
+        unsafe_allow_html=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Sidebar: about button
+# ---------------------------------------------------------------------------
+with st.sidebar:
+    st.markdown("<br>" * 3, unsafe_allow_html=True)
+    if st.button("ℹ️ このアプリについて", use_container_width=True):
+        show_about()
+
 
 # ---------------------------------------------------------------------------
 # Hero
